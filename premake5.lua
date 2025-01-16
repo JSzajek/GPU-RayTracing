@@ -38,6 +38,7 @@ outputdir = "%{cfg.system}-%{cfg.buildcfg}-%{cfg.architecture}"
 group ""
 	include "Utils"
 	include "SphereTracing"
+	include "TriangleTracing"
 group ""
 
 

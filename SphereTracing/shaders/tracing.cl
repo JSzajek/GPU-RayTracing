@@ -116,7 +116,6 @@ __kernel void trace(__global uchar4* image,
                     hit_point = ray_origin + t_min * ray_direction;
                     hit_normal = normalize(hit_point - sphereCenter);
                 }
-                break;
             }
         }
 
