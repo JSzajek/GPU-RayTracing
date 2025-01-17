@@ -4,3 +4,6 @@
 [submodule "vendor/opencv_lib"]
 	path = vendor/opencv_lib
 	url = https://github.com/JSzajek/OpenCV-Lib-fork.git
+[submodule "vendor/assimp"]
+	path = vendor/assimp
+	url = https://github.com/JSzajek/Assimp-Lib-fork.git

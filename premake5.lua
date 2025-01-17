@@ -39,6 +39,7 @@ group ""
 	include "Utils"
 	include "SphereTracing"
 	include "TriangleTracing"
+	include "MeshTracing"
 group ""
 
 

@@ -1,5 +1,6 @@
 include "vendor/opencl_lib/opencllink.lua"
 include "vendor/opencv_lib/opencv4link.lua"
+include "vendor/assimp/assimplink.lua"
 
 IncludeDir = {}
 LibraryDir = {}
