@@ -29,6 +29,9 @@ Open the generated .sln file and build the project.
 
 <img src="/OutputExample/Sphere_Tracing.png" alt="Sphere_Tracing" width="512"/>
 
+- Mesh Tracing
+
+<img src="/OutputExample/Mesh_Tracing.png" alt="Mesh_Tracing" width="512"/>
 
 ## **License**
 This project is licensed under the Apache License. See the LICENSE file for more details.
