@@ -28,6 +28,41 @@ typedef struct
     int _padding[3];
 } Triangle;
 
+typedef struct
+{
+    float4 min;
+    float4 max;
+} AABB;
+
+typedef struct
+{
+    AABB mBounds;
+    int mLeft;
+    int mRight;
+    int mStart;
+    int mCount;
+} BVHNode;
+
+float3 compute_barycentric(float3 p, float3 v0, float3 v1, float3 v2) 
+{
+    float3 v0v1 = v1 - v0;
+    float3 v0v2 = v2 - v0;
+    float3 v0p = p - v0;
+
+    float d00 = dot(v0v1, v0v1);
+    float d01 = dot(v0v1, v0v2);
+    float d11 = dot(v0v2, v0v2);
+    float d20 = dot(v0p, v0v1);
+    float d21 = dot(v0p, v0v2);
+
+    float denom = d00 * d11 - d01 * d01;
+    float v = (d11 * d20 - d01 * d21) / denom;
+    float w = (d00 * d21 - d01 * d20) / denom;
+    float u = 1.0f - v - w;
+
+    return (float3)(u, v, w);
+}
+
 bool ray_triangle_intersect(Ray ray,
                             Triangle tri,
                             float* t,
@@ -37,6 +72,7 @@ bool ray_triangle_intersect(Ray ray,
     // Compute edges of the tri and the determinant (using Möller–Trumbore algorithm)
     float3 e1 = (tri.vertex_1 - tri.vertex_0).xyz;
     float3 e2 = (tri.vertex_2 - tri.vertex_0).xyz;
+
     float3 h = cross(ray.direction, e2);
     float a = dot(e1, h);
     if (a > -1e-6 && a < 1e-6)
@@ -58,10 +94,17 @@ bool ray_triangle_intersect(Ray ray,
     {
         float w = 1 - u - v;
 
-        *t = det;
         *hit_point = ray.origin + det * ray.direction;
+        *t = det;
+
+        // Compute barycentric coordinates
+        float3 barycentric = compute_barycentric(*hit_point, tri.vertex_0.xyz, tri.vertex_1.xyz, tri.vertex_2.xyz);
+
         //*hit_normal = normalize(cross(e1, e2));
-        *hit_normal = normalize(tri.normal_0.xyz * w + tri.normal_1.xyz * u + tri.normal_2.xyz * v);
+        //*hit_normal = normalize(tri.normal_0.xyz * w + tri.normal_1.xyz * u + tri.normal_2.xyz * v);
+        *hit_normal = normalize(tri.normal_0.xyz * barycentric.x + 
+                                tri.normal_1.xyz * barycentric.y + 
+                                tri.normal_2.xyz * barycentric.z);
         return true;
     }
     return false;

@@ -13,6 +13,21 @@ cl_kernel kernel = nullptr;
 cl_command_queue queue = nullptr;
 cl_int err = -1;
 
+struct AABB
+{
+	Vector4f mMin;
+	Vector4f mMax;
+};
+
+struct BVHNode
+{
+	AABB mBounds;
+	int mLeft = -1;
+	int mRight = -1;
+	int mStart = 0;
+	int mCount = 0;
+};
+
 void UploadMesh(const Mesh& mesh, std::vector<Triangle>& output)
 {
 	for (const Triangle& triangle : mesh.triangles)
@@ -20,6 +35,155 @@ void UploadMesh(const Mesh& mesh, std::vector<Triangle>& output)
 		Triangle tri = triangle;
 		tri.materialIndex = mesh.materialIndex;
 		output.emplace_back(tri);
+	}
+}
+
+void InitializeScene(std::vector<Material>& materials,
+					 std::vector<Triangle>& triangles)
+{
+	Material mat1;
+	mat1.diffuseColor = { 0.0f, 0.8f, 0.8f, 0 };
+	mat1.specularColor = { 0.5f, 0.5f, 0.5f, 0 };
+	mat1.reflectivity = 0.1f;
+	mat1.shininess = 0.0f;
+	materials.emplace_back(mat1);
+
+	Material mat2;
+	mat2.diffuseColor = { 0.0f, 0.8f, 0.3f, 0 };
+	mat2.specularColor = { 1.0f, 1.0f, 1.0f, 0 };
+	mat2.reflectivity = 0.0f;
+	mat2.shininess = 64.0f;
+	materials.emplace_back(mat2);
+
+	Material mat3;
+	mat3.diffuseColor = { 0.0f, 0.3f, 0.8f, 0 };
+	mat3.specularColor = { 1.0f, 1.0f, 1.0f, 0 };
+	mat3.reflectivity = 0.3f;
+	mat3.shininess = 128.0f;
+	materials.emplace_back(mat3);
+
+	Mesh suzanne;
+	MeshImporter::Import("content/suzanne.obj", suzanne);
+	suzanne.materialIndex = 0;
+
+	Mesh sphere;
+	MeshImporter::Import("content/sphere.obj", sphere);
+	sphere.materialIndex = 2;
+
+	Mesh plane;
+	MeshImporter::Import("content/plane.obj", plane);
+	plane.materialIndex = 1;
+
+	UploadMesh(suzanne, triangles);
+	UploadMesh(sphere, triangles);
+	UploadMesh(plane, triangles);
+}
+
+Vector4f ComponentMinimum(const Vector4f& a, const Vector4f& b)
+{
+	return {std::min(a.x, b.x),
+			std::min(a.y, b.y),
+			std::min(a.z, b.z),
+			std::min(a.w, b.w)};
+}
+
+Vector4f ComponentMaximum(const Vector4f& a, const Vector4f& b)
+{
+	return {std::max(a.x, b.x),
+			std::max(a.y, b.y),
+			std::max(a.z, b.z),
+			std::max(a.w, b.w)};
+}
+
+AABB ComputeAABB(const std::vector<Triangle>& triangles, int start, int end) 
+{
+	AABB aabb;
+	
+	// Initialize AABB to very large and small values
+	aabb.mMin = Vector4f(FLT_MAX, FLT_MAX, FLT_MAX, 0);
+	aabb.mMax = Vector4f(-FLT_MAX, -FLT_MAX, -FLT_MAX, 0);
+
+	for (int i = start; i < end; ++i)
+	{
+		const Triangle& tri = triangles[i];
+
+		aabb.mMin = ComponentMinimum(aabb.mMin, tri.vertex_0);
+		aabb.mMin = ComponentMinimum(aabb.mMin, tri.vertex_1);
+		aabb.mMin = ComponentMinimum(aabb.mMin, tri.vertex_2);
+
+		aabb.mMax = ComponentMaximum(aabb.mMax, tri.vertex_0);
+		aabb.mMax = ComponentMaximum(aabb.mMax, tri.vertex_1);
+		aabb.mMax = ComponentMaximum(aabb.mMax, tri.vertex_2);
+	}
+
+	return aabb;
+}
+
+void ConstructBVH(std::vector<BVHNode>& nodes,
+				  std::vector<Triangle>& triangles,
+				  int maxTrianglesPerLeaf = 2)
+{
+	nodes.reserve(triangles.size() * 2);
+
+	struct BuildTask
+	{
+		int mStart = 0;
+		int mEnd = 0;
+		int mNodeIndex = 0;
+	};
+
+	std::vector<BuildTask> stack;
+	stack.push_back({0, static_cast<int>(triangles.size()), 0});
+
+	nodes.push_back(BVHNode());
+
+	while (!stack.empty())
+	{
+		BuildTask task = stack.back();
+		stack.pop_back();
+
+		const int start = task.mStart;
+		const int end = task.mEnd;
+		const int nodeIndex = task.mNodeIndex;
+		const int count = end - start;
+
+		BVHNode& node = nodes[nodeIndex];
+		node.mBounds = ComputeAABB(triangles, start, end);
+		if (count <= maxTrianglesPerLeaf)
+		{
+			node.mStart = start;
+			node.mCount = count;
+			node.mLeft = -1;
+			node.mRight = -1;
+			continue;
+		}
+
+		Vector4f size = node.mBounds.mMax - node.mBounds.mMin;
+		int axis = (size.x > size.y && size.x > size.z) ? 0 : (size.y > size.z ? 1 : 2);
+
+		// Partition
+		int mid = (count > 1) ? static_cast<int>((start + end) / 2.0f) : 1;
+		std::nth_element(triangles.begin() + start, triangles.begin() + mid, triangles.begin() + end,
+						 [axis](const Triangle& a, const Triangle& b)
+						 {
+							return a.Centriod()[axis] < b.Centriod()[axis];
+						 });
+
+		// Create children w/ placeholders
+		int leftChild = static_cast<int>(nodes.size());
+		nodes.push_back(BVHNode());
+
+		int rightChild = static_cast<int>(nodes.size());
+		nodes.push_back(BVHNode());
+
+		node = nodes[nodeIndex];
+		node.mLeft = leftChild;
+		node.mRight = rightChild;
+		node.mStart = -1;
+		node.mCount = -1;
+
+		stack.push_back({mid, end, rightChild});
+		stack.push_back({start, mid, leftChild});
 	}
 }
 
@@ -34,46 +198,20 @@ int main()
 	float fov = 60.0f;
 
 	std::vector<Material> Materials;
-	Material mat1;
-	mat1.diffuseColor = { 0.8f, 0.3f, 0.3f, 0 };
-	mat1.specularColor = { 1.0f, 1.0f, 1.0f, 0 };
-	mat1.reflectivity = 0.2f;
-	mat1.shininess = 64.0f;
-	Materials.emplace_back(mat1);
-
-	Material mat2;
-	mat2.diffuseColor = { 0.3f, 0.8f, 0.3f, 0 };
-	mat2.specularColor = { 1.0f, 1.0f, 1.0f, 0 };
-	mat2.reflectivity = 0.0f;
-	mat2.shininess = 64.0f;
-	Materials.emplace_back(mat2);
-
-	Material mat3;
-	mat3.diffuseColor = { 0.3f, 0.3f, 0.8f, 0 };
-	mat3.specularColor = { 1.0f, 1.0f, 1.0f, 0 };
-	mat3.reflectivity = 0.3f;
-	mat3.shininess = 128.0f;
-	Materials.emplace_back(mat3);
-
-	Mesh suzanne;
-	MeshImporter::Import("content/suzanne.obj", suzanne);
-	suzanne.materialIndex = 0;
-
-	Mesh sphere;
-	MeshImporter::Import("content/sphere.obj", sphere);
-	sphere.materialIndex = 2;
-
-	Mesh plane;
-	MeshImporter::Import("content/plane.obj", plane);
-	plane.materialIndex = 1;
-
 	std::vector<Triangle> Triangles;
-	UploadMesh(suzanne, Triangles);
-	UploadMesh(sphere, Triangles);
-	UploadMesh(plane, Triangles);
-
 	std::vector<Vector4f> Lights;
 	Lights.emplace_back(Vector4f(1.0f, 3.0f, 0.0f, 5.0f));
+
+	InitializeScene(Materials, Triangles);
+
+	std::vector<BVHNode> bvh;
+	ConstructBVH(bvh, Triangles, 5);
+
+
+	Vector4f ray_origin(1, -3, 2, 0);
+	Vector4f ray_target(1.7f, -0.4f, 1, 0);
+
+
 
 	if (!OpenCLUtils::initialize_device_and_context(device, context))
 		return -1;
@@ -89,11 +227,11 @@ int main()
 	const size_t imageBufferSize = Width * Height * sizeof(uint8_t) * 4;
 	cl_mem imageBuffer = OpenCLUtils::create_inout_buffer(context, outputImg.data, imageBufferSize);
 
-	int lightsCount = static_cast<int>(Lights.size());
+	const int lightsCount = static_cast<int>(Lights.size());
 	cl_mem lightsBuffer = OpenCLUtils::create_input_buffer(context, Lights.data(), lightsCount * sizeof(Vector4f));
-	int materialsCount = static_cast<int>(Materials.size());
+	const int materialsCount = static_cast<int>(Materials.size());
 	cl_mem materialsBuffer = OpenCLUtils::create_input_buffer(context, Materials.data(), materialsCount * sizeof(Material));
-	int trianglesCount = static_cast<int>(Triangles.size());
+	const int trianglesCount = static_cast<int>(Triangles.size());
 	cl_mem trianglesBuffer = OpenCLUtils::create_input_buffer(context, Triangles.data(), trianglesCount * sizeof(Triangle));
 
 	/* Create kernel arguments */
@@ -116,7 +254,7 @@ int main()
 
 	size_t global[2] = { Width, Height };
 
-	const std::string winName = "Triangle Tracing";
+	const std::string winName = "Mesh Tracing";
 	cv::namedWindow(winName, cv::WINDOW_AUTOSIZE);
 	cv::imshow(winName, outputImg);
 

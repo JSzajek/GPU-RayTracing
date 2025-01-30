@@ -36,3 +36,5 @@
 JSON/
 Binaries/*
 Intermediates/*
+
+!*/content/*
